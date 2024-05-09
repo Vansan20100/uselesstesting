@@ -119,8 +119,8 @@ def lancement_client(run,socketlist,server): #Protocol de communication client-s
 				while server_statut :
 					(activesockets, _, _) = select.select(socketlist, [], [])
 					for s in activesockets:
+						
 						if s == fifo:
-							
 							line = os.read(fifo, MAXBYTES)
 							lineD = line.decode()
 							if len(line)==0:
@@ -142,14 +142,13 @@ def lancement_client(run,socketlist,server): #Protocol de communication client-s
 									os.write(log,"commande inconnue\n".encode('utf-8'))
 							else:
 								line=("!!message "+line.decode()).encode()
-								
 								server.send(line)
 						else:
 							data = server.recv(MAXBYTES)
 							if len(data) == 0:
 								# run = False
-								break
-							if data.decode() != "!!BEAT\n":
+								continue
+							elif data.decode() != "!!BEAT\n":
 								os.write(log, data)
 								
 				help_offline(log)
@@ -172,8 +171,10 @@ def lancement_client(run,socketlist,server): #Protocol de communication client-s
 						elif lineD == "!help\n":
 							help_offline(log)
 						elif lineD == "!reconnect\n":
-							offline = False
 							run,socketlist,server=server_connection()
+							offline = False
+							socketlist.append(fifo)
+							
 						else:
 							os.write(log,"commande inconnue\n".encode('utf-8'))
 			os.close(fifo)
