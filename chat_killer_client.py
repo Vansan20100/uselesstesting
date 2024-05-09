@@ -9,12 +9,13 @@
 import os, socket, sys, select, time,signal
 
 
-def alarm_hdler(sig_num,frame): 
+def alarm_hdler(sig_num,frame): #Handler qui gère le heartbeat. Il envoie un "!!BEAT" au server toutes les secondes
 	global server
 	global server_statut
 	msg="!!BEAT"
 	try :
 		server.send(msg.encode('utf-8')) #detection d'erreur
+		server_statut= True
 		signal.alarm(1)
 	except :
 		server_statut = False
@@ -22,33 +23,34 @@ def alarm_hdler(sig_num,frame):
 
 
 	
-def server_connection():
-	HOST = sys.argv[1]
-	PORT = int(sys.argv[2])
+def server_connection(): #Protocole de gestion des connexions client-server
+	HOST = "127.0.0.1"
+	PORT = 2000
 	sockaddr = (HOST, PORT)
 	global server
 	global server_statut
+	global COOKIE
+	if (os.path.exists(pathcookie)):
+		COOKIE = True
 	try:
 		server = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # IPv4, TCP
 		server.connect(sockaddr)
-		if COOKIE :
-			fd = os.open("/tmp/killer.cookie", os.O_RDONLY)
+		if COOKIE :							#Protocole de reconnection si présence de cookie
+			fd = os.open(pathcookie, os.O_RDONLY)
 			fdr=os.read(fd,MAXBYTES).decode()
 			print("Envoie du cookie au server... ")
 			server.send(str('!!cookie '+fdr).encode())
 			os.close(fd)
-		else :
-
+		else :								#Protocole de premiere connection
 			server.send(str('!!pseudo ' + pseudo).encode())
-			fd=os.open("/tmp/killer.cookie", os.O_WRONLY|os.O_CREAT)
+			fd=os.open("/tmp/"+pseudo+".cookie", os.O_WRONLY|os.O_CREAT)
 			print("En attente de reception de cookie... ")
 			cookie=server.recv(MAXBYTES).decode('utf-8')
-			
-			cookie = cookie.split()[1]
 			print(cookie)
+			cookie = cookie.split()[1]
 			os.write(fd,cookie.encode())
 			os.close(fd)
-		signal.signal(signal.SIGALRM, alarm_hdler)
+		signal.signal(signal.SIGALRM, alarm_hdler) #Setup le HEARTBEAT
 		signal.alarm(1)
 		print('connected to:', sockaddr)
 		socketlist = [server]
@@ -60,7 +62,7 @@ def server_connection():
 
 
 
-def help(fd):
+def help(fd): #Affichage des commandes en ligne
     os.write(fd,"liste des commandes: \n".encode('utf-8'))
     os.write(fd,"	!quit pour quitter \n".encode('utf-8'))
     os.write(fd,"	!list pour lister les utilisateurs \n".encode('utf-8'))
@@ -68,9 +70,9 @@ def help(fd):
     os.write(fd,"	@pseudo message pour envoyer un message privé à :pseudo: \n".encode('utf-8'))
     os.write(fd,"	message pour envoyer un message public \n".encode('utf-8'))
     
-def help_offline(fd):
+def help_offline(fd):#Affichage des commandes hors ligne
 	os.write(fd,"Vous n'êtes plus connecté au server \n\n".encode('utf-8'))
-	os.write(fd,"Voici la liste des commandes hors-ligne: \n".encode('utf-8'))
+	os.write(fd,"Voici la liste des commandes hors ligne: \n".encode('utf-8'))
 	os.write(fd,"	!quit pour fermer le client \n".encode('utf-8'))
 	os.write(fd,"	!help pour afficher la liste des commandes \n".encode('utf-8'))
 	os.write(fd,"	!reconnect pour essayer de vous reconnecter au server\n".encode('utf-8'))
@@ -97,15 +99,13 @@ def term_affichage():	#tant que run == True, fermer un term le relance tout de s
 			os.wait()
 
 
-def lancement_client(run,socketlist,server):
+def lancement_client(run,socketlist,server): #Protocol de communication client-server
 	os.mkfifo(pathfifo) #tube nommé pour communication entre terminal de saisie et superviseur
-	
 	pid = os.fork()
 	quit = False
 	if pid == 0:
 		term_saisie()
 	else :
-		
 		fifo=os.open(pathfifo,os.O_RDONLY) #descripteur de fichier fifo readonly
 		socketlist.append(fifo)
 		log=os.open(pathlog, os.O_APPEND|os.O_TRUNC|os.O_CREAT|os.O_WRONLY) #descripteur de fichier log append, create if not exist, supprime le contenu à l'ouverture
@@ -116,7 +116,6 @@ def lancement_client(run,socketlist,server):
 			global server_statut
 			help(log)
 			while run :
-				
 				while server_statut :
 					(activesockets, _, _) = select.select(socketlist, [], [])
 					for s in activesockets:
@@ -124,7 +123,9 @@ def lancement_client(run,socketlist,server):
 							
 							line = os.read(fifo, MAXBYTES)
 							lineD = line.decode()
-							if lineD[0] == '!':
+							if len(line)==0:
+								continue
+							elif lineD[0] == '!':
 								if lineD == "!quit\n":
 									server.close()
 									run = False
@@ -157,7 +158,9 @@ def lancement_client(run,socketlist,server):
 				while offline and not(quit):
 					line = os.read(fifo, MAXBYTES)
 					lineD = line.decode()
-					if lineD[0] == '!':
+					if len(line)==0:
+						continue
+					elif lineD[0] == '!':
 						if lineD == "!quit\n":
 							server.close()
 							run = False
@@ -177,6 +180,7 @@ def lancement_client(run,socketlist,server):
 			os.close(log)
 			os.system("rm "+pathfifo)
 			os.system("rm "+pathlog)
+			os.system("rm "+pathcookie)
 			os.system("pkill xterm") #ferme tous les processus xterm
 			sys.exit(0)
 
@@ -186,17 +190,10 @@ def main():
 
 	
 if __name__ == "__main__":
-	pidsupp=os.getpid()
-	pathfifo = "/tmp/killer"+str(pidsupp)+".fifo"
-	pathlog = "/tmp/killer"+str(pidsupp)+".log"
+	pseudo = input("Entrez votre identifiant: ")
+	pathfifo = "/tmp/"+pseudo+".fifo"
+	pathlog = "/tmp/"+pseudo+".log"
+	pathcookie="/tmp/"+pseudo+".cookie"
 	MAXBYTES = 4096
 	COOKIE = False
-	server_statut = True
-	if len(sys.argv) <= 2:
-		print('Usage:', sys.argv[0], 'hote port')
-		sys.exit(1)
-	elif  not(os.path.exists("/tmp/killer.cookie")):
-		pseudo = input("Entrez votre pseudo: ")
-	else :
-		COOKIE = True
 	main()
