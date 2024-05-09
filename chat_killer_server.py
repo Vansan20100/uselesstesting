@@ -197,19 +197,25 @@ class Server:
         self.socketList.append(clientsocket)
         #! faire un select ppur eviter de bloquer
         txt = clientsocket.recv(MAXBYTES).decode()
+        print(txt)
         
-        pseudo = "client" + str(self.nb_clients) #! a enlever-----------------------------------------------
-        
-        if txt[:8] == "!!cookie ":
+        if txt[:8] == "!!cookie":
             cookie = txt.split()[1]
-            cookie = cookie[:-1] # on enleve le \n
+            
+            cookie = cookie # on enleve le \n
             for client in self.dicoClients.values():
                 if client.cookie == cookie: # on retrouve le client
+                    self.socketList.remove(client.socket)
+                    self.socketList.append(clientsocket)
+                    client.last_beat = time.time()
                     client.socket = clientsocket # on met à jour le socket
+                    self.dicoClients[clientsocket] = client
+                    
                     return
+            print("Erreur: cookie invalide")
                 
 
-        elif txt[:8] == "!!pseudo ":
+        elif txt[:8] == "!!pseudo":
             pseudo = txt.split()[1]
             if pseudo in self.dicoPseudo.keys():
                 clientsocket.send(str("!!wrong_pseudo\n").encode())
@@ -224,10 +230,9 @@ class Server:
 
             self.nb_clients += 1
 
-            clientsocket.send(str(f"!!cookie:{cookie}\n").encode())
-
-            self.mess_all(f"[+]{pseudo}!\n".encode())
+            clientsocket.send(str(f"!!cookie {cookie}\n").encode())
             print("New client connected")
+            self.mess_all(f"[+]{pseudo}\n".encode())
         
         else:
             self.disconnect_client(clientsocket)
@@ -242,7 +247,7 @@ def main():
         now = time.time()
         for sock in server.socketList:
             if sock != server.socket and sock != 0:
-                if now - server.dicoClients[sock].last_beat > BEAT_TIMEOUT:
+                if sock in server.dicoClients.keys() and now - server.dicoClients[sock].last_beat > BEAT_TIMEOUT:
                     print("Client {} timeout".format(server.dicoClients[sock].pseudo))
                     server.disconnect_client(sock)
         signal.alarm(BEAT_CHECK) # on remet l'alarme
@@ -278,7 +283,7 @@ def main():
 
         for sock in activesockets:
             if not sock in server.socketList:
-                print("Erreur: socket introuvable")
+                # le socket a été enlevé entre temps
                 continue
 
             if sock == serversocket:
